@@ -58,6 +58,62 @@ def extract_sql_columns_from_schema(sql_text: str) -> Dict[str, Set[str]]:
     return tables
 
 
+def extract_table_column_defs(sql_text: str) -> Dict[str, Dict[str, str]]:
+    tables: Dict[str, Dict[str, str]] = {}
+    create_re = re.compile(r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([\w\."]+)\s*\((.*?)\)\s*;', re.S | re.I)
+    for m in create_re.finditer(sql_text):
+        tname = normalize_identifier(m.group(1))
+        body = m.group(2)
+        cols: Dict[str, str] = {}
+        for col_def in re.split(r',\s*', body):
+            line = col_def.strip()
+            if not line or line.upper().startswith('CONSTRAINT') or line.upper().startswith('PRIMARY KEY'):
+                continue
+            parts = re.split(r"\s+", line, maxsplit=1)
+            col = parts[0].rstrip(',')
+            coln = normalize_identifier(col)
+            if coln:
+                cols[coln] = line
+        if cols:
+            tables[tname] = cols
+
+    alter_re = re.compile(r'ALTER\s+TABLE\s+([\w\."]+)\s+ADD\s+COLUMN\s+([\w\."]+)(.*?);', re.I | re.S)
+    for m in alter_re.finditer(sql_text):
+        tname = normalize_identifier(m.group(1))
+        col = normalize_identifier(m.group(2))
+        rest = m.group(3).strip()
+        tables.setdefault(tname, {})[col] = (m.group(2) + ' ' + rest).strip()
+
+    return tables
+
+
+def has_data_type_annotation(head_sql: str, table: str, column: str, col_def: str) -> bool:
+    if not column:
+        return False
+    if col_def and re.search(r'data_type\s*[:=]', col_def, re.I):
+        return True
+
+    com_re = re.compile(r"COMMENT\s+ON\s+COLUMN\s+([\w\.\"]+\.)?([\w\"]+)\s+IS\s+'([^']*)'", re.I)
+    for m in com_re.finditer(head_sql):
+        col_name = normalize_identifier(m.group(2))
+        comment = m.group(3)
+        if col_name == column and re.search(r'data_type\s*[:=]', comment, re.I):
+            return True
+
+    if col_def:
+        idx = head_sql.find(col_def)
+        if idx != -1:
+            before = head_sql[max(0, idx-200):idx+len(col_def)+200]
+            if re.search(r'--.*data_type\s*[:=]', before, re.I) or re.search(r'/\*.*data_type\s*[:=].*\*/', before, re.I | re.S):
+                return True
+
+    pat = re.compile(re.escape(column) + r"[^\n]*--[^\n]*data_type\s*[:=]", re.I)
+    if pat.search(head_sql):
+        return True
+
+    return False
+
+
 def extract_select_columns(sql_text: str) -> Set[str]:
     """Find simple SELECT column lists and aliases: SELECT a, b as c FROM ..."""
     cols = set()
@@ -107,18 +163,25 @@ def extract_go_field_accesses(path: str) -> List[Tuple[str, int]]:
 
 
 def scan_repo(root: str) -> Dict[str, Dict]:
-    # gather SQL columns
+    # gather SQL columns and definitions
     sql_columns: Set[str] = set()
+    all_sql_text = ''
+    col_defs: Dict[str, Dict[str, str]] = {}
     for f in find_files(root, ('.sql',)):
         try:
             with open(f, 'r', encoding='utf-8') as fh:
                 txt = fh.read()
         except Exception:
             continue
+        all_sql_text += '\n' + txt
         cols_schema = extract_sql_columns_from_schema(txt)
-        for cols in cols_schema.values():
+        for t, cols in cols_schema.items():
             sql_columns.update(cols)
-        sql_columns.update(extract_select_columns(txt))
+        sel_cols = extract_select_columns(txt)
+        sql_columns.update(sel_cols)
+        defs = extract_table_column_defs(txt)
+        for t, m in defs.items():
+            col_defs.setdefault(t, {}).update(m)
 
     # prepare column -> expected Go field names
     col_to_field = {}
@@ -141,6 +204,20 @@ def scan_repo(root: str) -> Dict[str, Dict]:
                     if field.startswith(v):
                         results[col]['usages'].append({'file': os.path.relpath(g, root), 'line': ln, 'field': field})
                         break
+                        break
+
+    # annotate whether columns have data_type annotations
+    for t, cols in col_defs.items():
+        for col, defn in cols.items():
+            annotated = has_data_type_annotation(all_sql_text, t, col, defn)
+            results.setdefault(col, {'usages': []})['annotated'] = annotated
+
+    # For columns that have no explicit definition snippets, still try to find annotations via comments
+    for col in list(sql_columns):
+        if col not in results or 'annotated' not in results[col]:
+            # unknown table context – pass empty defn and empty table
+            annotated = has_data_type_annotation(all_sql_text, '', col, '')
+            results.setdefault(col, {'usages': []})['annotated'] = annotated
 
     # Convert defaultdict to normal dict
     return dict(results)
