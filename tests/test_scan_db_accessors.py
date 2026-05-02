@@ -42,3 +42,35 @@ func main() {
     assert 'description' in res
     usages = res['description']['usages']
     assert any(u['file'].endswith('main.go') for u in usages)
+    # annotation should be absent by default
+    assert res['description'].get('annotated') is False
+
+
+def test_scan_repo_detects_annotations(tmp_path):
+    root = tmp_path / 'repo2'
+    root.mkdir()
+    sql = """
+    CREATE TABLE items (
+      id int,
+      description text -- data_type: pii
+    );
+    """
+    (root / 'schema.sql').write_text(sql)
+
+    go = '''package main
+
+type Item struct {
+    ID int
+    Description string
+}
+
+func main() {
+    var it Item
+    _ = it.Description
+}
+'''
+    (root / 'main.go').write_text(go)
+
+    res = scan_repo(str(root))
+    assert 'description' in res
+    assert res['description'].get('annotated') is True
