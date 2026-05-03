@@ -155,14 +155,13 @@ def has_data_type_annotation(head_sql: str, table: str, column: str, col_def: st
 
     # look for inline SQL comments near the column definition
     if col_def:
-        # find the col_def in head_sql and examine a few surrounding lines
         idx = head_sql.find(col_def)
         if idx != -1:
             before = head_sql[max(0, idx-200):idx+len(col_def)+200]
             if re.search(r'--.*data_type\s*[:=]', before, re.I) or re.search(r'/\*.*data_type\s*[:=].*\*/', before, re.I | re.S):
                 return True
 
-    # last resort: search for any occurrence of 'column' followed shortly by a comment containing data_type
+    # look for data_type inline comments
     pat = re.compile(re.escape(column) + r"[^\n]*--[^\n]*data_type\s*[:=]", re.I)
     if pat.search(head_sql):
         return True
