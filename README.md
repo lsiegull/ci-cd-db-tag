@@ -1,6 +1,6 @@
 # DB Field Change Detector
 
-Small prototype that detects added database fields (columns) in SQL files by comparing the repository HEAD against a base git ref.
+Small prototype that detects added database fields (columns) in SQL files by comparing the repository HEAD against a base git ref. This can be run locally or implemented as a Github action such that is part of the CI/CD flow for submitting pull requests to a repository.
 
 Usage:
 
@@ -25,21 +25,21 @@ CI/CD tool for data labelling
 Usage for the repository scanner
 --------------------------------
 
-A separate scanner is provided to find Go code that accesses database fields (useful when using `sqlc`-generated structs).
+A separate scanner is provided to find Go code that accesses database fields (useful when using `sqlc`-generated structs). It also identifies if those fields lack data type annotations.
 
 Run a quick scan from the repository root:
 
 ```bash
-python scan_db_accessors.py --repo .
+python scan_db_accessors.py --repo <repository-ref>
 ```
 
 Print machine-readable JSON output:
 
 ```bash
-python scan_db_accessors.py --repo . --json
+python scan_db_accessors.py --repo <repository-ref> --json
 ```
 
 Notes:
 - The scanner uses simple heuristics: it parses SQL `CREATE TABLE` / `ALTER TABLE` statements and `SELECT` lists, maps snake_case column names to CamelCase Go field names, and looks for `.Field` access patterns in `.go` files.
-- This is a lightweight tool intended as a starting point — it may need refinement for complex aliases, embedded structs, or custom naming rules used by `sqlc`.
+
 
