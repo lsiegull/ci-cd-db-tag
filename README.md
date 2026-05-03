@@ -1,6 +1,6 @@
-# DB Field Change Detector
+## Database Field Change Detector
 
-Small prototype that detects added database fields (columns) in SQL files by comparing the repository HEAD against a base git ref. This can be run locally or implemented as a Github action such that is part of the CI/CD flow for submitting pull requests to a repository.
+Small prototype that detects added database fields (columns) in SQL files by comparing the repository HEAD against a base git ref and checks if they have been appropriately annotated. This can be run locally or implemented as a Github action such that is part of the CI/CD flow for submitting pull requests to a repository.
 
 Usage:
 
@@ -13,17 +13,11 @@ python detect_new_fields.py --base origin/main
 Or check specific files:
 
 ```bash
-python detect_new_fields.py --files migrations/001_init.sql schema/tables.sql
+python detect_new_fields.py --files migrations/<file-name>.sql schema/tables.sql
 ```
 
-Exit codes:
-- `0` no new fields detected
-- `2` new fields detected
-# ci-cd-db-tag
-CI/CD tool for data labelling
 
-Usage for the repository scanner
---------------------------------
+## Repository Scanner
 
 A separate scanner is provided to find Go code that accesses database fields (useful when using `sqlc`-generated structs). It also identifies if those fields lack data type annotations.
 
